@@ -74,3 +74,53 @@ use soft as aes;
 use aesni as aes;
 
 pub use crate::aes::{Aes128Ctr, Aes192Ctr, Aes256Ctr};
+
+#[test]
+fn compare_to_openssl_with_over_64bit_nonce_and_counter() {
+    use cipher::{NewStreamCipher, SyncStreamCipher, SyncStreamCipherSeek};
+    use core::fmt;
+    use hex_literal::hex;
+    // values from https://github.com/RustCrypto/stream-ciphers/issues/12 poc
+
+    #[derive(PartialEq, Eq)]
+    struct HexOnly<'a>(&'a [u8]);
+
+    impl<'a> fmt::Debug for HexOnly<'a> {
+        fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.iter().try_for_each(|b| write!(fmt, "{:02x}", b))
+        }
+    }
+
+    let key = hex!("0dc1 430e 6954 f687 d8d8 28fb 1a54 77df");
+    let nonce = hex!("1aff ffff ffff ffff ffff ffff ffff ffff");
+    let data = hex!(
+        "ffff ffff ffff ffff ffff ffff ffff ffff
+        ffff ffff ffff ffff ffff ffff ffff ffff
+        ffff ffff ffff ffff ffff ffff ffff ffff
+        ffff ffff ffff ffff ffff ffff 07ff ffff
+        ffff ffff ffff ffff ffff ffff ffff ffff
+        ffff ffff ffff ffff ffff ffff ffff ffff
+        ffff ca7c d800"
+    );
+
+    let openssl = hex!(
+        "6cfd 499f 292b 5e4f 0f79 80ba 87f6 c257
+        1bde e9d8 024a 6a4f 46ef 695d 7da9 3bf3
+        abe1 0fa5 6657 4f01 1f7d 9748 c7b8 470e
+        45c8 0d05 ab1a 6a56 8137 fedb a633 2269
+        9aa6 0c6c ef64 997d e588 561e e995 a94d
+        9a19 e26b cd35 90e9 3ee1 edda 07f6 3d92
+        1fbd d4b2 6858"
+    );
+
+    let mut cipher = Aes128Ctr::new_var(&key, &nonce).unwrap();
+    let mut encrypted = data.to_vec();
+    cipher.apply_keystream(&mut encrypted);
+
+    assert_eq!(HexOnly(&encrypted[..]), HexOnly(&openssl[..]));
+
+    cipher.seek(0);
+    cipher.apply_keystream(&mut encrypted[..]);
+
+    assert_eq!(&encrypted[..], &data[..]);
+}

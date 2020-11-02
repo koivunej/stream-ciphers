@@ -19,6 +19,7 @@ dependencies = [
  "aesni",
  "cipher",
  "ctr",
+ "hex-literal",
 ]
 
 [[package]]
