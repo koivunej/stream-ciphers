@@ -76,20 +76,9 @@ use aesni as aes;
 pub use crate::aes::{Aes128Ctr, Aes192Ctr, Aes256Ctr};
 
 #[test]
-fn compare_to_openssl_with_over_64bit_nonce_and_counter() {
-    use cipher::{NewStreamCipher, SyncStreamCipher, SyncStreamCipherSeek};
-    use core::fmt;
+fn compare_to_openssl_with_poc_values() {
     use hex_literal::hex;
     // values from https://github.com/RustCrypto/stream-ciphers/issues/12 poc
-
-    #[derive(PartialEq, Eq)]
-    struct HexOnly<'a>(&'a [u8]);
-
-    impl<'a> fmt::Debug for HexOnly<'a> {
-        fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-            self.0.iter().try_for_each(|b| write!(fmt, "{:02x}", b))
-        }
-    }
 
     let key = hex!("0dc1 430e 6954 f687 d8d8 28fb 1a54 77df");
     let nonce = hex!("1aff ffff ffff ffff ffff ffff ffff ffff");
@@ -113,14 +102,79 @@ fn compare_to_openssl_with_over_64bit_nonce_and_counter() {
         1fbd d4b2 6858"
     );
 
-    let mut cipher = Aes128Ctr::new_var(&key, &nonce).unwrap();
-    let mut encrypted = data.to_vec();
-    cipher.apply_keystream(&mut encrypted);
+    compare_scenario(&key, &data, &nonce, &openssl);
+}
 
-    assert_eq!(HexOnly(&encrypted[..]), HexOnly(&openssl[..]));
+#[test]
+fn compare_to_openssl_at_zero_nonce() {
+    use hex_literal::hex;
+
+    let nonce = [0; 16];
+    let expected = hex!("66e94bd4ef8a2c3b884cfa59ca342b2e58e2fccefa7e3061367f1d57a4e7455a0388dace60b6a392f328c2b971b2fe78f795aaab494b5923f7fd89ff948bc1e0");
+
+    // this should match the behaviour before the #75
+    compare_scenario(&[0; 16], &[0; 4 * 16], &nonce, &expected);
+}
+
+#[test]
+fn compare_to_openssl_near_64bit_le() {
+    use hex_literal::hex;
+
+    let nonce = (u64::MAX as u128 - 1).to_le_bytes();
+    let expected = hex!("0fc33b45e52ac8f00392805984e573c6e2a4ba8f764fa3fbe8b6e6e3cda6ecfff7ffe7a8bc8c8214384903c72e2d54fd20c10ba6f72ff0734fc4e545b7b1e585");
+
+    // this shouldn't wrap around as the nonce is treated as big endian input; this should match
+    // behaviour before the #75
+    compare_scenario(&[0; 16], &[0; 4 * 16], &nonce, &expected);
+}
+
+#[test]
+fn compare_to_openssl_near_64bit_be() {
+    use hex_literal::hex;
+
+    let nonce = (u64::MAX as u128 - 1).to_be_bytes();
+    let expected = hex!("99c5f4ae0531eece7c33dab98d5e289d747cb9267e59fa9e4e615668db0909bc788bcd111ecf73d4e78d2e21bef55460daacdaf76b0cffc0fa1498a35ebe1dfc");
+
+    // changed in #75 as previously counter was 64-bit and only half of nonce was affected by it
+    // wrapping around.
+    compare_scenario(&[0; 16], &[0; 4 * 16], &nonce, &expected);
+}
+
+#[test]
+fn compare_to_openssl_near_128bit_be() {
+    use hex_literal::hex;
+
+    let nonce = (u128::MAX as u128 - 1).to_be_bytes();
+    let expected = hex!("5c005e72c1418c44f569f2ea33ba54f33f5b8cc9ea855a0afa7347d23e8d664e66e94bd4ef8a2c3b884cfa59ca342b2e58e2fccefa7e3061367f1d57a4e7455a");
+
+    // changed in #75 for same reason as `compare_to_openssl_near_64bit_be`.
+    compare_scenario(&[0; 16], &[0; 4 * 16], &nonce, &expected);
+}
+
+/// Run aes-ctr against openssl generated next four blocks from the nonce.
+#[cfg(test)]
+fn compare_scenario(key: &[u8], data: &[u8], nonce: &[u8], expected: &[u8]) {
+    use cipher::{NewStreamCipher, SyncStreamCipher, SyncStreamCipherSeek};
+    use core::fmt;
+
+    #[derive(PartialEq, Eq)]
+    struct HexOnly<'a>(&'a [u8]);
+
+    impl<'a> fmt::Debug for HexOnly<'a> {
+        fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.iter().try_for_each(|b| write!(fmt, "{:02x}", b))
+        }
+    }
+
+    assert_eq!(expected.len(), data.len());
+
+    let mut cipher = Aes128Ctr::new_var(&key, &nonce).unwrap();
+
+    let mut encrypted = data.to_vec();
+    cipher.apply_keystream(&mut encrypted[..]);
+    assert_eq!(&encrypted[..], &expected[..]);
 
     cipher.seek(0);
     cipher.apply_keystream(&mut encrypted[..]);
-
     assert_eq!(&encrypted[..], &data[..]);
 }
