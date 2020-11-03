@@ -9,4 +9,5 @@ members = [
     "ofb",
     "rabbit",
     "salsa20",
+    "aes-ctr/aes-ctr-compat"
 ]

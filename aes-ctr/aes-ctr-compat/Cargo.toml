@@ -1,0 +1,14 @@
+[package]
+name = "aes-ctr-compat"
+version = "0.1.0"
+authors = ["Joonas Koivunen <joonas.koivunen@gmail.com>"]
+description = "aes-ctr tests against openssl"
+publish = false
+edition = "2018"
+
+
+
+[dev-dependencies]
+cipher = { version = "0.2", features = ["dev"] }
+aes-ctr = { version = "*", path = "../" }
+openssl = { version = "0.10" }
